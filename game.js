@@ -611,3 +611,45 @@ function resetGame() {
   spawnEnemiesInsideArena(INITIAL_ENEMY_COUNT);
   spawnInitialPowerups(INITIAL_POWERUP_COUNT);
       }
+function showGameOverScreen() {
+  background(0, 0, 0, 200);
+  fill('red');
+  textAlign(CENTER, CENTER);
+  textSize(40);
+  text('GAME OVER 💀', width / 2, height / 2 - 60);
+  drawRestartButton();
+}
+
+function showVictoryScreen() {
+  background(0, 200, 100, 200);
+  fill('yellow');
+  textAlign(CENTER, CENTER);
+  textSize(40);
+  text('VICTORY! 🎉', width / 2, height / 2 - 60);
+  drawRestartButton();
+}
+
+function drawRestartButton() {
+  fill(255);
+  rect(width / 2 - 60, height / 2, 120, 50, 10);
+  fill(0);
+  textSize(20);
+  text('Restart', width / 2, height / 2 + 25);
+}
+
+function mousePressed() {
+  if ((gameOver || victory) &&
+      mouseX > width / 2 - 60 && mouseX < width / 2 + 60 &&
+      mouseY > height / 2 && mouseY < height / 2 + 50) {
+    restartGame();
+  }
+}
+
+function restartGame() {
+  player.hp = 5;
+  enemies = createEnemies(); // however you spawn them
+  bullets = [];
+  powerUps = [];
+  gameOver = false;
+  victory = false;
+}
