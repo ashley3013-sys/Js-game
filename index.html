@@ -66,6 +66,31 @@ function draw() {
     translate(-camX, -camY);
 
     drawArenaBackground();
+    function drawBullets(showTrails = false) {
+  fill(255, 255, 0);
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    let b = bullets[i];
+    b.x += b.dx * 12;
+    b.y += b.dy * 12;
+
+    // Draw bullet
+    ellipse(b.x, b.y, 10);
+
+    // Bullet collision with enemies
+    for (let e of enemies) {
+      if (e.hp > 0 && dist(b.x, b.y, e.x, e.y) < 20) {
+        e.hp -= 1; // enemy takes 1 damage
+        bullets.splice(i, 1); // remove bullet
+        break;
+      }
+    }
+
+    // Remove bullets if they go too far
+    if (b.x < 0 || b.y < 0 || b.x > worldWidth || b.y > worldHeight) {
+      bullets.splice(i, 1);
+    }
+  }
+    }
     drawWalls();
     updatePowerups();
     updateEnemies();
