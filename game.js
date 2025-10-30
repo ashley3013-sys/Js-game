@@ -1,18 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>JS game</title>
-
-    <!-- ✅ Load p5.js before your script -->
-    <script src="https://cdn.jsdelivr.net/npm/p5@1.9.0/lib/p5.min.js"></script>
-  </head>
-
-  <body style="margin:0; padding:0; overflow:hidden; background:#000;">
-    <!-- ✅ Load your game code AFTER p5.js -->
-    <script src="game.js">
-      // Ashley's Full Brawl Mini — Complete, robust version with rectangular walls
+// Ashley's Full Brawl Mini — Complete, robust version with rectangular walls
 // Paste entire file into p5.js web editor and Run
 
 // ---------- CONFIG ----------
@@ -625,6 +611,3 @@ function resetGame() {
   spawnEnemiesInsideArena(INITIAL_ENEMY_COUNT);
   spawnInitialPowerups(INITIAL_POWERUP_COUNT);
       }
-    </script>
-  </body>
-</html>
