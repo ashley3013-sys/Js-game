@@ -1,0 +1,598 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Js Game</title>
+  </head>
+  <body>
+    <script>
+      // Ashley's Full Brawl Mini — Complete, robust version with rectangular walls
+// Paste entire file into p5.js web editor and Run
+
+// ---------- CONFIG ----------
+const ARENA_SIZE = 1600;            // square arena (centered at 0,0)
+const INITIAL_ENEMY_COUNT = 36;
+const INITIAL_POWERUP_COUNT = 3;
+const WALL_COUNT = 8;              // number of large rectangular walls
+const FRAME_RATE = 60;
+
+// ---------- GAME STATE ----------
+let player;                         // player object (initialized in resetGame)
+let bullets = [];
+let enemies = [];
+let powerups = [];
+let walls = [];
+
+let camX = 0, camY = 0;
+
+let tripleShot = false;
+let tripleTimer = 0; // frames
+
+let gameState = "play"; // "play", "gameOver", "victory"
+let score = 0;
+
+// joystick UI & touch
+let joystick = {
+  baseX: 100,
+  baseY: null, // set in setup()
+  radius: 70,
+  dragging: false,
+  offsetX: 0,
+  offsetY: 0,
+  normX: 0,
+  normY: 0
+};
+
+let shootCooldown = 0;
+let lastTapWasShoot = false;
+
+// ---------- p5.js lifecycle ----------
+function setup() {
+  createCanvas(windowWidth, windowHeight);
+  frameRate(FRAME_RATE);
+
+  joystick.baseY = height - 110;
+  resetGame();
+}
+
+function draw() {
+  background(32, 40, 60);
+
+  // camera follows player center
+  camX = player.x - width / 2;
+  camY = player.y - height / 2;
+
+  if (gameState === "play") {
+    push();
+    translate(-camX, -camY);
+
+    drawArenaBackground();
+    drawWalls();
+    updatePowerups();
+    updateEnemies();
+    updateBullets();
+    drawPlayer();
+    drawPlayerHealthBar();
+
+    pop();
+
+    drawHUD();
+    drawJoystickUI();
+    drawShootButtonUI();
+
+    // timers
+    if (tripleShot) {
+      tripleTimer--;
+      if (tripleTimer <= 0) tripleShot = false;
+    }
+    if (shootCooldown > 0) shootCooldown--;
+
+    // game state transitions
+    if (player.health <= 0) {
+      player.health = 0;
+      gameState = "gameOver";
+    } else if (enemies.length === 0) {
+      gameState = "victory";
+    }
+
+  } else {
+    // draw a snapshot of the world behind the overlay so it doesn't feel empty
+    push();
+    translate(-camX, -camY);
+    drawArenaBackground();
+    drawWalls();
+    drawEnemies(true);
+    drawBullets(true);
+    drawPlayer();
+    drawPlayerHealthBar();
+    pop();
+
+    drawEndScreen();
+  }
+}
+
+// ---------- DRAW HELPERS ----------
+function drawArenaBackground() {
+  push();
+  stroke(255,255,255,10);
+  strokeWeight(1);
+  const step = 100;
+  for (let x = -ARENA_SIZE/2; x <= ARENA_SIZE/2; x += step) {
+    line(x, -ARENA_SIZE/2, x, ARENA_SIZE/2);
+  }
+  for (let y = -ARENA_SIZE/2; y <= ARENA_SIZE/2; y += step) {
+    line(-ARENA_SIZE/2, y, ARENA_SIZE/2, y);
+  }
+  noStroke();
+  pop();
+}
+
+function drawWalls() {
+  push();
+  fill(84);
+  noStroke();
+  for (let w of walls) {
+    rect(w.x, w.y, w.w, w.h, 6);
+  }
+  pop();
+}
+
+function drawPlayer() {
+  push();
+  fill(32, 200, 220);
+  noStroke();
+  ellipse(player.x, player.y, player.size);
+  pop();
+}
+
+function drawPlayerHealthBar() {
+  push();
+  let barW = 80;
+  let barH = 10;
+  let bx = player.x - barW/2;
+  let by = player.y - player.size/2 - 18;
+  fill(0);
+  rect(bx-1, by-1, barW+2, barH+2, 3);
+  fill(200,0,0);
+  rect(bx, by, barW, barH, 3);
+  fill(0,255,0);
+  let pw = map(player.health, 0, player.maxHealth, 0, barW);
+  rect(bx, by, pw, barH, 3);
+  pop();
+}
+
+function drawHUD() {
+  push();
+  resetMatrix();
+  fill(255);
+  textSize(18);
+  textAlign(LEFT, TOP);
+  text(`Enemies: ${enemies.length}`, 16, 16);
+  text(`Score: ${score}`, 16, 40);
+  if (tripleShot) {
+    text(`Triple: ${ceil(tripleTimer / FRAME_RATE)}s`, 16, 68);
+  }
+  pop();
+}
+
+function drawJoystickUI() {
+  push();
+  resetMatrix();
+  // base
+  fill(45,45,45,160);
+  ellipse(joystick.baseX, joystick.baseY, joystick.radius*2);
+  // knob
+  fill(220);
+  ellipse(joystick.baseX + joystick.offsetX, joystick.baseY + joystick.offsetY, 48);
+  pop();
+
+  // apply movement from joystick normalized offsets
+  let mvx = joystick.normX * 4.0;
+  let mvy = joystick.normY * 4.0;
+  if (abs(mvx) > 0.01 || abs(mvy) > 0.01) {
+    let nextX = player.x + mvx;
+    if (!collidesWithWall(nextX, player.y, player.size)) {
+      player.x = constrain(nextX, -ARENA_SIZE/2 + player.size/2, ARENA_SIZE/2 - player.size/2);
+    }
+    let nextY = player.y + mvy;
+    if (!collidesWithWall(player.x, nextY, player.size)) {
+      player.y = constrain(nextY, -ARENA_SIZE/2 + player.size/2, ARENA_SIZE/2 - player.size/2);
+    }
+  }
+}
+
+function drawShootButtonUI() {
+  push();
+  resetMatrix();
+  let sx = width - 100, sy = height - 100;
+  fill((mouseIsPressed && dist(mouseX, mouseY, sx, sy) < 60) ? 'orange' : 'gray');
+  ellipse(sx, sy, 80);
+  pop();
+}
+
+function drawEndScreen() {
+  push();
+  resetMatrix();
+  fill(0,0,0,180);
+  rect(0,0,width,height);
+  textAlign(CENTER, CENTER);
+  fill(255);
+  textSize(36);
+  if (gameState === "gameOver") text("💀 GAME OVER 💀", width/2, height/2 - 60);
+  else text("🏆 VICTORY! 🏆", width/2, height/2 - 60);
+
+  fill(120, 255, 140);
+  ellipse(width/2, height/2 + 40, 140);
+  fill(0);
+  textSize(22);
+  text("RESTART", width/2, height/2 + 40);
+  pop();
+}
+
+// ---------- UPDATE LOGIC ----------
+function updateEnemies() {
+  // update enemies; draw handled within if needed
+  for (let i = enemies.length - 1; i >= 0; i--) {
+    let e = enemies[i];
+
+    // direction to player
+    let dx = player.x - e.x;
+    let dy = player.y - e.y;
+    let d = sqrt(dx*dx + dy*dy) || 0.0001;
+    let ang = atan2(dy, dx);
+
+    // desired step
+    let step = e.speed;
+    let tryX = e.x + cos(ang) * step;
+    let tryY = e.y + sin(ang) * step;
+
+    // sliding movement with wall checks
+    if (!collidesWithWall(tryX, tryY, e.size)) {
+      e.x = tryX; e.y = tryY;
+    } else {
+      if (!collidesWithWall(tryX, e.y, e.size)) {
+        e.x = tryX;
+      } else if (!collidesWithWall(e.x, tryY, e.size)) {
+        e.y = tryY;
+      } else {
+        // jitter escape
+        e.x += random(-0.6, 0.6);
+        e.y += random(-0.6, 0.6);
+      }
+    }
+
+    // clamp within arena
+    e.x = constrain(e.x, -ARENA_SIZE/2 + e.size/2 + 4, ARENA_SIZE/2 - e.size/2 - 4);
+    e.y = constrain(e.y, -ARENA_SIZE/2 + e.size/2 + 4, ARENA_SIZE/2 - e.size/2 - 4);
+
+    // contact damage (gentle per frame)
+    if (dist(e.x, e.y, player.x, player.y) < (e.size + player.size)/2 - 6) {
+      player.health -= e.contactDamage / FRAME_RATE;
+    }
+
+    // draw enemy and hp bar (world space)
+    push();
+    if (e.type === "normal") fill(220, 60, 60);
+    else if (e.type === "tough") fill(130, 40, 40);
+    else if (e.type === "fast") fill(255, 140, 40);
+    else if (e.type === "crawler") fill(90, 180, 100);
+    noStroke();
+    ellipse(e.x, e.y, e.size);
+
+    // hp bar
+    fill(0);
+    rect(e.x - e.size/2, e.y - e.size/2 - 8, e.size, 4);
+    fill(0,255,0);
+    let hpw = map(e.hp, 0, e.maxHp, 0, e.size);
+    rect(e.x - e.size/2, e.y - e.size/2 - 8, hpw, 4);
+    pop();
+
+    if (e.hp <= 0) {
+      if (random() < 0.25) powerups.push(spawnPowerupAt(e.x, e.y));
+      enemies.splice(i, 1);
+      score++;
+    }
+  }
+}
+
+function drawEnemies(drawOnly=false) {
+  // optional draw-only path for paused end-screen snapshot
+  for (let e of enemies) {
+    push();
+    if (e.type === "normal") fill(220, 60, 60);
+    else if (e.type === "tough") fill(130, 40, 40);
+    else if (e.type === "fast") fill(255, 140, 40);
+    else fill(90, 180, 100);
+    ellipse(e.x, e.y, e.size);
+    pop();
+  }
+}
+
+function updateBullets(drawOnly=false) {
+  for (let i = bullets.length - 1; i >= 0; i--) {
+    let b = bullets[i];
+    if (!drawOnly) {
+      b.x += b.dx * b.speed;
+      b.y += b.dy * b.speed;
+    }
+
+    // bullet hits wall?
+    if (collidesWithWall(b.x, b.y, 6)) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    // out of arena
+    if (b.x < -ARENA_SIZE/2 || b.x > ARENA_SIZE/2 || b.y < -ARENA_SIZE/2 || b.y > ARENA_SIZE/2) {
+      bullets.splice(i, 1);
+      continue;
+    }
+
+    // hit enemy
+    if (!drawOnly) {
+      for (let j = enemies.length - 1; j >= 0; j--) {
+        let e = enemies[j];
+        if (dist(b.x, b.y, e.x, e.y) < (e.size/2 + 4)) {
+          e.hp -= b.damage;
+          bullets.splice(i, 1);
+          break;
+        }
+      }
+    }
+  }
+
+  // draw bullets
+  push();
+  noStroke();
+  fill(255, 200, 0);
+  for (let b of bullets) ellipse(b.x, b.y, 8);
+  pop();
+}
+
+function updatePowerups() {
+  for (let i = powerups.length - 1; i >= 0; i--) {
+    let p = powerups[i];
+    if (p.collected) continue;
+    push();
+    fill(0,220,120);
+    noStroke();
+    ellipse(p.x, p.y, 22);
+    pop();
+    if (dist(player.x, player.y, p.x, p.y) < 28) {
+      p.collected = true;
+      tripleShot = true;
+      tripleTimer = FRAME_RATE * 10; // 10s
+      // respawn single powerup after delay
+      setTimeout(()=> {
+        let np = spawnPowerup();
+        powerups.push(np);
+      }, 10000);
+    }
+  }
+}
+
+// ---------- COLLISION ----------
+function collidesWithWall(cx, cy, diameter=20) {
+  let r = diameter/2;
+  for (let w of walls) {
+    if (cx + r > w.x && cx - r < w.x + w.w && cy + r > w.y && cy - r < w.y + w.h) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// ---------- SPAWN & RESET ----------
+function resetGame() {
+  // init player at center (0,0)
+  player = { x: 0, y: 0, size: 44, health: 100, maxHealth: 100 };
+
+  bullets = [];
+  enemies = [];
+  powerups = [];
+  walls = [];
+  tripleShot = false;
+  tripleTimer = 0;
+  score = 0;
+  gameState = "play";
+  shootCooldown = 0;
+  lastTapWasShoot = false;
+
+  createRandomWalls();
+  spawnEnemiesInsideArena(INITIAL_ENEMY_COUNT);
+  spawnInitialPowerups(INITIAL_POWERUP_COUNT);
+
+  joystick.baseY = height - 110;
+  joystick.offsetX = 0;
+  joystick.offsetY = 0;
+  joystick.normX = 0;
+  joystick.normY = 0;
+}
+
+function createRandomWalls() {
+  walls = [];
+  let tries = 0;
+  while (walls.length < WALL_COUNT && tries < 2000) {
+    tries++;
+    let w = random(160, 420);
+    let h = random(120, 320);
+    let x = random(-ARENA_SIZE/2 + 40, ARENA_SIZE/2 - 40 - w);
+    let y = random(-ARENA_SIZE/2 + 40, ARENA_SIZE/2 - 40 - h);
+
+    // avoid blocking spawn center too much
+    let spawnSafe = 180;
+    if (x < -spawnSafe && x + w > spawnSafe && y < -spawnSafe && y + h > spawnSafe) {
+      continue;
+    }
+
+    // check loose overlap with existing walls
+    let ok = true;
+    for (let ex of walls) {
+      if (!(x + w + 40 < ex.x || x > ex.x + ex.w + 40 || y + h + 40 < ex.y || y > ex.y + ex.h + 40)) {
+        ok = false; break;
+      }
+    }
+    if (ok) walls.push({ x: x, y: y, w: w, h: h });
+  }
+}
+
+function spawnEnemiesInsideArena(count) {
+  enemies = [];
+  let margin = 120;
+  for (let i = 0; i < count; i++) {
+    // choose type probabilistically
+    let r = random();
+    let type = "normal";
+    if (r < 0.55) type = "normal";
+    else if (r < 0.78) type = "fast";
+    else if (r < 0.94) type = "poison";
+    else type = "tough";
+
+    let x,y;
+    let attempts = 0;
+    do {
+      x = random(-ARENA_SIZE/2 + margin, ARENA_SIZE/2 - margin);
+      y = random(-ARENA_SIZE/2 + margin, ARENA_SIZE/2 - margin);
+      attempts++;
+      if (attempts > 300) break;
+    } while (collidesWithWall(x, y, 36) || dist(x,y, 0,0) < 180);
+
+    let e = { x: x, y: y, type: type, size: 36, hp: 60, maxHp: 60, speed: 1.15, contactDamage: 0.35 };
+
+    if (type === "fast")   { e.size = 28; e.hp = 40; e.maxHp = 40; e.speed = 2.2; e.contactDamage = 0.2; }
+    if (type === "poison") { e.size = 34; e.hp = 80; e.maxHp = 80; e.speed = 1.0; e.contactDamage = 0.5; }
+    if (type === "tough")  { e.size = 52; e.hp = 140; e.maxHp = 140; e.speed = 0.75; e.contactDamage = 0.7; }
+
+    enemies.push(e);
+  }
+}
+
+function spawnInitialPowerups(n) {
+  for (let i = 0; i < n; i++) {
+    powerups.push(spawnPowerup());
+  }
+}
+
+function spawnPowerup() {
+  let tries = 0;
+  while (tries < 300) {
+    tries++;
+    let x = random(-ARENA_SIZE/2 + 80, ARENA_SIZE/2 - 80);
+    let y = random(-ARENA_SIZE/2 + 80, ARENA_SIZE/2 - 80);
+    if (!collidesWithWall(x, y, 26) && dist(x,y,0,0) > 120) return { x: x, y: y, collected: false };
+  }
+  // fallback
+  return { x: 0, y: 0, collected: false };
+}
+
+function spawnPowerupAt(x,y) {
+  return { x: x + random(-16,16), y: y + random(-16,16), collected: false };
+}
+
+// ---------- INPUT: touch + mouse ----------
+function touchStarted() {
+  let sx = mouseX, sy = mouseY;
+  // joystick area (screen-space)
+  if (dist(sx, sy, joystick.baseX, joystick.baseY) <= joystick.radius + 20) {
+    joystick.dragging = true;
+    updateJoystick(sx, sy);
+    lastTapWasShoot = false;
+  } else {
+    // shoot toward finger (convert to world coords)
+    shootAtScreen(sx, sy);
+    lastTapWasShoot = true;
+  }
+
+  // on end-screen restart
+  if (gameState !== "play") {
+    let bx = width/2, by = height/2 + 40, br = 70;
+    if (dist(sx, sy, bx, by) < br) resetGame();
+  }
+  return false;
+}
+
+function touchMoved() {
+  if (joystick.dragging) updateJoystick(mouseX, mouseY);
+  return false;
+}
+
+function touchEnded() {
+  joystick.dragging = false;
+  joystick.offsetX = 0; joystick.offsetY = 0;
+  joystick.normX = 0; joystick.normY = 0;
+  return false;
+}
+
+function mousePressed() { touchStarted(); }
+function mouseDragged() { touchMoved(); }
+function mouseReleased() { touchEnded(); }
+
+function updateJoystick(sx, sy) {
+  let dx = sx - joystick.baseX;
+  let dy = sy - joystick.baseY;
+  let d = sqrt(dx*dx + dy*dy);
+  if (d > joystick.radius) {
+    dx = dx / d * joystick.radius;
+    dy = dy / d * joystick.radius;
+  }
+  joystick.offsetX = dx;
+  joystick.offsetY = dy;
+  joystick.normX = dx / joystick.radius;
+  joystick.normY = dy / joystick.radius;
+}
+
+// ---------- SHOOTING ----------
+function shootAtScreen(sx, sy) {
+  if (shootCooldown > 0) return;
+  let targetX = sx + camX;
+  let targetY = sy + camY;
+  shootToward(targetX, targetY);
+  shootCooldown = 12;
+}
+
+function shootToward(tx, ty) {
+  // compute angle from player to target in world coords
+  let ang = atan2(ty - player.y, tx - player.x);
+  let bspd = 12;
+  let bdmg = 25;
+  if (tripleShot) {
+    let offs = [-0.22, 0, 0.22];
+    for (let o of offs) {
+      bullets.push({ x: player.x, y: player.y, dx: cos(ang + o), dy: sin(ang + o), speed: bspd, damage: bdmg });
+    }
+  } else {
+    bullets.push({ x: player.x, y: player.y, dx: cos(ang), dy: sin(ang), speed: bspd, damage: bdmg });
+  }
+}
+
+// ---------- UTILITIES ----------
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  joystick.baseY = height - 110;
+}
+
+function resetGame() {
+  // initialize player if not exists
+  if (!player) player = {};
+  player.x = 0; player.y = 0;
+  player.size = 44;
+  player.health = 100;
+  player.maxHealth = 100;
+
+  bullets = [];
+  enemies = [];
+  powerups = [];
+  walls = [];
+  tripleShot = false;
+  tripleTimer = 0;
+  score = 0;
+  gameState = "play";
+  shootCooldown = 0;
+  lastTapWasShoot = false;
+
+  createRandomWalls();
+  spawnEnemiesInsideArena(INITIAL_ENEMY_COUNT);
+  spawnInitialPowerups(INITIAL_POWERUP_COUNT);
+      }
+    </script>
+  </body>
+</html>
